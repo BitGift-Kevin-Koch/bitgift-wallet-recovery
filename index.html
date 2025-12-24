@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>BitGift Wallet-Wiederherstellung</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    body {
+      background:#f5f7fb;
+      margin:0;
+      padding:20px;
+      font-family:"Inter",system-ui,sans-serif;
+      color:#111;
+    }
+    .bitgift-recovery-box {
+      background:#fff;
+      border-radius:20px;
+      border:1px solid rgba(0,97,255,0.15);
+      box-shadow:0 6px 20px rgba(0,97,255,0.08);
+      padding:32px 28px;
+      max-width:520px;
+      margin:20px auto;
+    }
+    h1 {
+      text-align:center;
+      margin-bottom:10px;
+      background:linear-gradient(90deg,#0061ff,#60efff);
+      -webkit-background-clip:text;
+      -webkit-text-fill-color:transparent;
+      font-weight:600;
+      font-size:1.5rem;
+    }
+    h2 {
+      text-align:center;
+      margin-top:0;
+      margin-bottom:18px;
+      font-size:0.95rem;
+      color:#555;
+    }
+    label {
+      font-weight:500;
+      margin-bottom:6px;
+      color:#333;
+      display:block;
+    }
+    input {
+      width:100%;
+      padding:10px;
+      border-radius:10px;
+      border:1px solid rgba(0,97,255,0.25);
+      background:#f9f9ff;
+      margin-bottom:14px;
+      font-size:1rem;
+    }
+    input:focus {
+      border-color:#60efff;
+      box-shadow:0 0 6px rgba(0,97,255,0.25);
+      outline:none;
+    }
+    button {
+      width:100%;
+      background:linear-gradient(90deg,#0061ff,#60efff);
+      border:none;
+      padding:12px;
+      border-radius:9999px;
+      color:#fff;
+      font-weight:600;
+      cursor:pointer;
+      box-shadow:0 4px 15px rgba(0,97,255,0.25);
+      margin-top:6px;
+      font-size:0.95rem;
+    }
+    button:hover:not(:disabled) {
+      filter:brightness(1.05);
+      box-shadow:0 6px 20px rgba(0,97,255,0.35);
+    }
+    .bitgift-output {
+      margin-top:14px;
+      padding:12px;
+      border-radius:10px;
+      background:#f9f9ff;
+      border:1px dashed rgba(0,0,0,0.15);
+      font-family:monospace;
+      font-size:0.9rem;
+      color:#111;
+      word-break:break-all;
+      display:none;
+    }
+    .warning {
+      color:#b00;
+      font-size:0.85rem;
+      margin-top:8px;
+      text-align:center;
+    }
+    #qr-wrapper {
+      display:none;
+      justify-content:center;
+      align-items:center;
+      margin-top:14px;
+    }
+    #qr-text {
+      display:none;
+      text-align:center;
+      margin-top:10px;
+      font-size:0.9rem;
+      color:#444;
+      font-weight:500;
+    }
+    .footer-note {
+      text-align:center;
+      color:#777;
+      margin-top:20px;
+      font-size:0.8rem;
+      line-height:1.4;
+    }
+    .footer-note code {
+      background:#eee;
+      padding:2px 4px;
+      border-radius:4px;
+      font-size:0.75rem;
+    }
+  </style>
+</head>
+<body>
+
+<div class="bitgift-recovery-box">
+  <h1>BitGift Wallet-Wiederherstellung</h1>
+
+  <label for="card-id">Kartennummer</label>
+  <input id="card-id" type="text" placeholder="z. B. 2024000003">
+
+  <label for="wallet-pin">Wallet-Passwort</label>
+  <input id="wallet-pin" type="password" placeholder="Passwort(wie bei Aktivierung)">
+
+  <button id="recover-btn">Wallet wiederherstellen</button>
+
+  <div class="warning">
+    ⚠ Zeige den privaten Schlüssel (WIF) nur auf einem sicheren Gerät an.
+  </div>
+
+  <div id="status" style="text-align:center;margin-top:16px;color:#555;"></div>
+
+  <div id="address-output" class="bitgift-output"></div>
+  <div id="wif-output" class="bitgift-output"></div>
+
+  <div id="qr-text">Privater Schlüssel (WIF) als QR-Code – nur auf sicheren Geräten scannen.</div>
+  <div id="qr-wrapper"><div id="qr"></div></div>
+</div>
+
+<p class="footer-note">
+  Wiederherstellung basiert auf:<br>
+  <code>seed = SHA256("BitGift-v1|" + cardId + "|" + Passwort)</code><br>
+  <code>Pfad: m/84'/0'/0'/0/0 (P2WPKH / bech32)</code>
+</p>
+
+<!-- ❗ Wichtig: dieselben Dateien wie auf deiner WordPress-Seite, lokal im selben Ordner -->
+<script src="./bitcoinjs.min.js"></script>
+<script src="./qrcode.min.js"></script>
+
+<script>
+(function() {
+
+  // BitcoinJS aus deinem Theme (global: window.bitcoinjs)
+  const Bitcoin = window.bitcoinjs;
+  const statusEl = document.getElementById('status');
+
+  function fatal(msg) {
+    if (statusEl) {
+      statusEl.textContent = msg;
+      statusEl.style.color = '#b00';
+    } else {
+      alert(msg);
+    }
+  }
+
+  if (!Bitcoin || !Bitcoin.bip32 || !Bitcoin.crypto || !Bitcoin.payments) {
+    console.error('BitcoinJS global object:', window.bitcoinjs);
+    fatal('BitcoinJS-Bibliothek konnte nicht geladen werden. Bitte überprüfe, ob bitcoinjs.min.js im selben Ordner liegt.');
+    return;
+  }
+
+  const cardEl = document.getElementById('card-id');
+  const pinEl  = document.getElementById('wallet-pin');
+  const addrEl = document.getElementById('address-output');
+  const wifEl  = document.getElementById('wif-output');
+  const qrText = document.getElementById('qr-text');
+  const qrWrap = document.getElementById('qr-wrapper');
+  const qrBox  = document.getElementById('qr');
+
+  function setStatus(text, color) {
+    statusEl.textContent = text || '';
+    statusEl.style.color = color || '#555';
+  }
+
+  function validate(cardId, pin) {
+    if (!cardId || !pin) {
+      setStatus('Bitte Kartennummer und Passwort eingeben.', '#b00');
+      return false;
+    }
+    if (pin.length < 6 || pin.length > 15) {
+      setStatus('Passwort muss 6–15 Zeichen lang sein.', '#b00');
+      return false;
+    }
+    if (!/[a-z]/.test(pin)) { setStatus('Kleinbuchstabe fehlt.', '#b00'); return false; }
+    if (!/[A-Z]/.test(pin)) { setStatus('Großbuchstabe fehlt.', '#b00'); return false; }
+    if (!/[0-9]/.test(pin)) { setStatus('Zahl fehlt.', '#b00'); return false; }
+    return true;
+  }
+
+  function deriveNode(pin, cardId) {
+    const domain = 'BitGift-v1|';
+    const enc = new TextEncoder();
+    const data = enc.encode(domain + cardId + '|' + pin);
+    const seed = Bitcoin.crypto.sha256(data); // 32 Byte
+    const root = Bitcoin.bip32.fromSeed(seed);
+    return root.derivePath("m/84'/0'/0'/0/0");
+  }
+
+  document.getElementById('recover-btn').addEventListener('click', function () {
+    const cardId = cardEl.value.trim();
+    const pin    = pinEl.value.trim();
+
+    addrEl.style.display = 'none';
+    wifEl.style.display  = 'none';
+    qrText.style.display = 'none';
+    qrWrap.style.display = 'none';
+    qrBox.innerHTML      = '';
+
+    if (!validate(cardId, pin)) return;
+
+    try {
+      setStatus('Wallet wird berechnet…', '#111');
+
+      const node = deriveNode(pin, cardId);
+      const payment = Bitcoin.payments.p2wpkh({ pubkey: node.publicKey });
+      const address = payment.address;
+      const wif     = node.toWIF();
+
+      addrEl.textContent = 'Adresse: ' + address;
+      wifEl.textContent  = 'Privater Schlüssel (WIF): ' + wif;
+
+      addrEl.style.display = 'block';
+      wifEl.style.display  = 'block';
+
+      new QRCode(qrBox, {
+        text: wif,
+        width: 180,
+        height: 180
+      });
+
+      qrText.style.display = 'block';
+      qrWrap.style.display = 'flex';
+
+      setStatus('Wallet erfolgreich wiederhergestellt.', '#0a7');
+    } catch (e) {
+      console.error(e);
+      setStatus('Fehler bei der Wallet-Berechnung.', '#b00');
+    }
+  });
+
+})();
+</script>
+
+</body>
+</html>
