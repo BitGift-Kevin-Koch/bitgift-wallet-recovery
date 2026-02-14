@@ -36,7 +36,7 @@ m/84'/0'/0'/0/0 (P2WPKH / bech32)
 
 Die Backup-Version ist hier erreichbar:
 
-➡️ **https://kevinkoch-bg.github.io/bitgift-wallet-recovery/**
+➡️ **https://bitgift-kevin-koch.github.io/bitgift-wallet-recovery**
 
 ---
 
